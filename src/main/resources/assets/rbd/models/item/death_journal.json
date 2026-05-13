@@ -1,0 +1,6 @@
+{
+  "parent": "item/book",
+  "textures": {
+    "layer0": "item/writable_book"
+  }
+}

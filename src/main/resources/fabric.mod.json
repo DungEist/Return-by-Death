@@ -1,0 +1,37 @@
+{
+	"schemaVersion": 1,
+	"id": "rbd",
+	"version": "${version}",
+	"name": "Return by Death",
+	"description": "Mod lấy cảm hứng từ cơ chế Return by Death trong Re:Zero.",
+	"authors": [
+		"Deist"
+	],
+	"contact": {},
+	"license": "CC0-1.0",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"com.deist.rbd.core.RbdMod"
+		],
+		"client": [
+			"com.deist.rbd.core.RbdClientEntrypoint"
+		],
+		"modmenu": [
+			"com.deist.rbd.client.ModMenuIntegration"
+		]
+	},
+	"mixins": [
+		"rbd.mixins.json"
+	],
+	"depends": {
+		"fabricloader": ">=0.15.11",
+		"minecraft": "~1.20.4",
+		"java": ">=17",
+		"fabric-api": "*",
+		"cloth-config": "*"
+	},
+	"suggests": {
+		"modmenu": "*"
+	}
+}

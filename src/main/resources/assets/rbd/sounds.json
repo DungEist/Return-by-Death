@@ -1,0 +1,26 @@
+{
+  "heartbeat_fast": {
+    "category": "player",
+    "sounds": [
+      "rbd:heartbeat_fast"
+    ]
+  },
+  "reverse_whoosh": {
+    "category": "player",
+    "sounds": [
+      "rbd:reverse_whoosh"
+    ]
+  },
+  "call_of_the_witch": {
+    "category": "player",
+    "sounds": [
+      "rbd:call_of_the_witch"
+    ]
+  },
+  "aishiteru": {
+    "category": "player",
+    "sounds": [
+      "rbd:aishiteru"
+    ]
+  }
+}
