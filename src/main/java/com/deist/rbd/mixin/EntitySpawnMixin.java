@@ -32,6 +32,19 @@ public class EntitySpawnMixin {
         if (com.deist.rbd.checkpoint.CheckpointManager.getSnapshotUuids().contains(entity.getUuid())) return;
 
         ServerWorld world = (ServerWorld) (Object) this;
+
+        // FIX: Boss mobs (Wither, Dragon) được quản lý qua bossSnapshots,
+        // KHÔNG log là SPAWNED để tránh bị xóa khi rollback.
+        if (entity.getType() == net.minecraft.entity.EntityType.WITHER ||
+            entity.getType() == net.minecraft.entity.EntityType.ENDER_DRAGON) {
+            // Cập nhật bossSnapshot thay vì log là spawned
+            net.minecraft.nbt.NbtCompound snap = new net.minecraft.nbt.NbtCompound();
+            entity.writeNbt(snap);
+            snap.putString("id", net.minecraft.entity.EntityType.getId(entity.getType()).toString());
+            RbdEntityLog.get(world).updateBossSnapshot(entity.getUuid(), snap, world.getTime());
+            return; // KHÔNG log là SPAWNED
+        }
+
         RbdEntityLog.get(world).recordSpawned(entity.getUuid(), world.getTime());
     }
 }

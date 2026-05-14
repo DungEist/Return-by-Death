@@ -23,7 +23,7 @@ public class RbdClientEffects {
 
     public static void startRollback() {
         state = 1;
-        maxTicks = 40; // 2 seconds
+        maxTicks = 120; // 6 giây timeout, đủ cho server rollback xong
         ticksRemaining = maxTicks;
         playSound(HEARTBEAT_SOUND);
     }
@@ -60,7 +60,11 @@ public class RbdClientEffects {
 
         if (ticksRemaining <= 0) {
             if (state == 1) {
-                // Should wait for complete packet
+                // Timeout safety: nếu ROLLBACK_COMPLETE packet không đến sau 120 ticks,
+                // tự chuyển sang white flash để không kẹt mãi
+                state = 2;
+                maxTicks = 10;
+                ticksRemaining = maxTicks;
             } else if (state == 2) {
                 state = 3;
                 maxTicks = 40;

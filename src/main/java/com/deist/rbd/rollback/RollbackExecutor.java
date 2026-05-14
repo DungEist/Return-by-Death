@@ -78,7 +78,6 @@ public class RollbackExecutor {
                         sw.iterateEntities().forEach(entity -> {
                             if (entity instanceof PlayerEntity) return;
                             if (spawnedUuids.contains(entity.getUuid())) toRemove.add(entity);
-                            // Also remove projectiles unconditionally
                             if (entity instanceof ProjectileEntity || entity instanceof EyeOfEnderEntity)
                                 toRemove.add(entity);
                         });
@@ -87,9 +86,7 @@ public class RollbackExecutor {
                             RbdPendingDeletions.remove(e.getUuid());
                         });
 
-                        // Step B: Re-apply checkpoint NBT for entities that still exist
-                        // (handles health/position drift for mobs that were alive at checkpoint
-                        //  and are still alive now but may have moved or been damaged)
+                        // Step B: Re-apply checkpoint NBT for entities still alive
                         Map<UUID, NbtCompound> snapshotByUuid = new HashMap<>();
                         for (NbtCompound snap : cp.entitySnapshots) {
                             if (snap.containsUuid("UUID")) {
@@ -109,7 +106,28 @@ public class RollbackExecutor {
                             }
                         });
 
-                        // Step C: Restore entities KILLED after checkpoint (from delta log)
+                        // Step C: Respawn entities từ snapshot mà HIỆN KHÔNG TỒN TẠI trong world
+                        for (NbtCompound snap : cp.entitySnapshots) {
+                            if (!snap.containsUuid("UUID")) continue;
+                            String snapDim = snap.getString("RbdDim");
+                            if (!new Identifier(snapDim).equals(sw.getRegistryKey().getValue())) continue;
+                            
+                            UUID snapUuid = snap.getUuid("UUID");
+                            if (spawnedUuids.contains(snapUuid)) continue; // spawned after checkpoint, đã xóa
+                            
+                            Entity existing = sw.getEntity(snapUuid);
+                            if (existing == null) {
+                                // Entity có trong checkpoint nhưng đã bị kill/remove → respawn
+                                NbtCompound clean = snap.copy();
+                                clean.remove("RbdDim");
+                                EntityType.loadEntityWithPassengers(clean, sw, entity -> {
+                                    sw.spawnEntity(entity);
+                                    return entity;
+                                });
+                            }
+                        }
+
+                        // Step D: Restore entities KILLED after checkpoint (từ delta log — cho unloaded chunk entities)
                         log.restoreKilled(sw, checkpointUuids);
                     });
                 } finally {
@@ -206,7 +224,8 @@ public class RollbackExecutor {
                 });
 
                 // === 10. PLAYER RESTORE ===
-                player.teleport(targetWorld, cp.pos.getX() + 0.5, cp.pos.getY(), cp.pos.getZ() + 0.5, cp.yaw, cp.pitch);
+                double safeY = findSafeY(targetWorld, cp.pos);
+                player.teleport(targetWorld, cp.pos.getX() + 0.5, safeY, cp.pos.getZ() + 0.5, cp.yaw, cp.pitch);
                 player.setHealth(cp.health);
                 player.getHungerManager().setFoodLevel(cp.hunger);
                 player.getHungerManager().setSaturationLevel(cp.saturation);
@@ -247,5 +266,32 @@ public class RollbackExecutor {
                 com.deist.rbd.journal.DeathJournalItem.ensureJournal(player);
             });
         });
+    }
+
+    private static double findSafeY(ServerWorld world, BlockPos checkpointPos) {
+        // Thử đứng trên block tại checkpoint pos
+        // Tìm Y cao nhất mà không phải solid block trong khoảng ±2 block
+        for (int dy = 0; dy <= 2; dy++) {
+            BlockPos feet = checkpointPos.up(dy);
+            BlockPos head = feet.up(1);
+            net.minecraft.block.BlockState feetState = world.getBlockState(feet);
+            net.minecraft.block.BlockState headState = world.getBlockState(head);
+            
+            if (!feetState.isSolidBlock(world, feet) && !headState.isSolidBlock(world, head)) {
+                // Đứng được ở đây — tính Y chính xác dựa trên collision shape của block bên dưới
+                BlockPos below = feet.down();
+                net.minecraft.block.BlockState belowState = world.getBlockState(below);
+                if (!belowState.isAir()) {
+                    // Lấy top của block bên dưới
+                    var shapes = belowState.getCollisionShape(world, below);
+                    if (!shapes.isEmpty()) {
+                        return below.getY() + shapes.getBoundingBox().maxY;
+                    }
+                }
+                return feet.getY();
+            }
+        }
+        // Fallback: đứng trên đỉnh block checkpoint
+        return checkpointPos.getY() + 1.0;
     }
 }

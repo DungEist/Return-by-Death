@@ -76,6 +76,15 @@ public class MiasmaManager extends PersistentState {
         if (eff <= 0) return false;
 
         long last = lastGameDay.getOrDefault(uuid, currentWorldDay);
+        
+        // FIX: Nếu world time bị rewind (RbD), reset lastGameDay về currentWorldDay
+        // để tránh daysPassed âm gây decay không bao giờ trigger
+        if (currentWorldDay < last) {
+            lastGameDay.put(uuid, currentWorldDay);
+            markDirty();
+            return false;
+        }
+
         long daysPassed = currentWorldDay - last;
 
         if (daysPassed >= RbdConfig.get().miasmaDecayDays) {
