@@ -9,12 +9,10 @@
     "PlayerDeathMixin",
     "SpawnPointMixin",
     "PlayerInteractionMixin",
-    "LivingEntityDeathMixin",
     "EntitySpawnMixin",
     "ChunkStorageAccessor",
     "RaidManagerAccessor",
     "EntityMixin",
-    "EntityRemoveMixin",
     "PiglinGoldBypassMixin",
     "RidingPreventMixin"
   ],

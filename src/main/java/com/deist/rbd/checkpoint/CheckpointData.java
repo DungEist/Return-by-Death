@@ -33,18 +33,20 @@ public class CheckpointData {
     public final int rainTime;
     public final int thunderTime;
     public final int clearWeatherTime;
-    public final List<NbtCompound> itemEntitySnapshots;
-    public final List<NbtCompound> entitySnapshots;      // ALL living entities at checkpoint
-    public final List<NbtCompound> blockEntitySnapshots;  // Container block entities at checkpoint
-    public final NbtCompound enderChestInventory;         // Per-player ender chest snapshot
+    public final NbtCompound enderChestInventory;
+
+    // ── Replaces entitySnapshots + itemEntitySnapshots ─────────────────────
+    public final EntitySnapshot entitySnapshot;
+
+    // ── Block entity snapshots (containers) — unchanged ────────────────────
+    public final List<NbtCompound> blockEntitySnapshots;
 
     public CheckpointData(BlockPos pos, float yaw, float pitch, float health, int hunger, float saturation,
                           int experienceLevel, float experienceProgress, int sculkWarningLevel,
                           int loopNumber, long worldTime, String dimension, long timestamp,
                           DefaultedList<ItemStack> inventory, Collection<StatusEffectInstance> effects,
                           boolean raining, boolean thundering, int rainTime, int thunderTime, int clearWeatherTime,
-                          List<NbtCompound> itemEntitySnapshots,
-                          List<NbtCompound> entitySnapshots,
+                          EntitySnapshot entitySnapshot,
                           List<NbtCompound> blockEntitySnapshots,
                           NbtCompound enderChestInventory) {
         this.pos = pos; this.yaw = yaw; this.pitch = pitch;
@@ -63,21 +65,20 @@ public class CheckpointData {
         this.raining = raining; this.thundering = thundering;
         this.rainTime = rainTime; this.thunderTime = thunderTime;
         this.clearWeatherTime = clearWeatherTime;
-        this.itemEntitySnapshots = itemEntitySnapshots != null ? itemEntitySnapshots : new ArrayList<>();
-        this.entitySnapshots = entitySnapshots != null ? entitySnapshots : new ArrayList<>();
+        this.entitySnapshot = entitySnapshot != null ? entitySnapshot : new EntitySnapshot();
         this.blockEntitySnapshots = blockEntitySnapshots != null ? blockEntitySnapshots : new ArrayList<>();
         this.enderChestInventory = enderChestInventory != null ? enderChestInventory : new NbtCompound();
     }
 
+    // Private constructor for readNbt
     private CheckpointData(BlockPos pos, float yaw, float pitch, float health, int hunger, float saturation,
-                          int experienceLevel, float experienceProgress, int sculkWarningLevel,
-                          int loopNumber, long worldTime, String dimension, long timestamp,
-                          DefaultedList<ItemStack> inventory, List<NbtCompound> statusEffects,
-                          boolean raining, boolean thundering, int rainTime, int thunderTime, int clearWeatherTime,
-                          List<NbtCompound> itemEntitySnapshots,
-                          List<NbtCompound> entitySnapshots,
-                          List<NbtCompound> blockEntitySnapshots,
-                          NbtCompound enderChestInventory) {
+                           int experienceLevel, float experienceProgress, int sculkWarningLevel,
+                           int loopNumber, long worldTime, String dimension, long timestamp,
+                           DefaultedList<ItemStack> inventory, List<NbtCompound> statusEffects,
+                           boolean raining, boolean thundering, int rainTime, int thunderTime, int clearWeatherTime,
+                           EntitySnapshot entitySnapshot,
+                           List<NbtCompound> blockEntitySnapshots,
+                           NbtCompound enderChestInventory) {
         this.pos = pos; this.yaw = yaw; this.pitch = pitch;
         this.health = health; this.hunger = hunger; this.saturation = saturation;
         this.experienceLevel = experienceLevel; this.experienceProgress = experienceProgress;
@@ -88,8 +89,7 @@ public class CheckpointData {
         this.raining = raining; this.thundering = thundering;
         this.rainTime = rainTime; this.thunderTime = thunderTime;
         this.clearWeatherTime = clearWeatherTime;
-        this.itemEntitySnapshots = itemEntitySnapshots != null ? itemEntitySnapshots : new ArrayList<>();
-        this.entitySnapshots = entitySnapshots != null ? entitySnapshots : new ArrayList<>();
+        this.entitySnapshot = entitySnapshot != null ? entitySnapshot : new EntitySnapshot();
         this.blockEntitySnapshots = blockEntitySnapshots != null ? blockEntitySnapshots : new ArrayList<>();
         this.enderChestInventory = enderChestInventory != null ? enderChestInventory : new NbtCompound();
     }
@@ -107,20 +107,22 @@ public class CheckpointData {
         for (int i = 0; i < inventory.size(); i++) {
             ItemStack stack = inventory.get(i);
             if (!stack.isEmpty()) {
-                NbtCompound t = new NbtCompound(); t.putByte("Slot", (byte) i);
-                stack.writeNbt(t); invList.add(t);
+                NbtCompound t = new NbtCompound();
+                t.putByte("Slot", (byte) i);
+                stack.writeNbt(t);
+                invList.add(t);
             }
         }
         nbt.put("Inventory", invList);
-
         nbt.put("StatusEffects", copyList(statusEffects));
         nbt.putBoolean("Raining", raining); nbt.putBoolean("Thundering", thundering);
         nbt.putInt("RainTime", rainTime); nbt.putInt("ThunderTime", thunderTime);
         nbt.putInt("ClearWeatherTime", clearWeatherTime);
-        nbt.put("ItemEntities", copyList(itemEntitySnapshots));
-        nbt.put("EntitySnapshots", copyList(entitySnapshots));
         nbt.put("BlockEntitySnapshots", copyList(blockEntitySnapshots));
         if (!enderChestInventory.isEmpty()) nbt.put("EnderChestInventory", enderChestInventory.copy());
+
+        // Entity snapshot (new system)
+        entitySnapshot.writeNbt(nbt);
     }
 
     private NbtList copyList(List<NbtCompound> list) {
@@ -148,16 +150,18 @@ public class CheckpointData {
         String dim = nbt.getString("Dimension");
         if (dim.isEmpty()) dim = "minecraft:overworld";
 
-        return new CheckpointData(pos, nbt.getFloat("Yaw"), nbt.getFloat("Pitch"),
-                nbt.getFloat("Health"), nbt.getInt("Hunger"), nbt.getFloat("Saturation"),
-                nbt.getInt("ExperienceLevel"), nbt.getFloat("ExperienceProgress"),
-                nbt.getInt("SculkWarningLevel"),
-                nbt.getInt("LoopNumber"), nbt.getLong("WorldTime"), dim, nbt.getLong("Timestamp"),
-                inv, readList(nbt, "StatusEffects"),
-                nbt.getBoolean("Raining"), nbt.getBoolean("Thundering"),
-                nbt.getInt("RainTime"), nbt.getInt("ThunderTime"), nbt.getInt("ClearWeatherTime"),
-                readList(nbt, "ItemEntities"), readList(nbt, "EntitySnapshots"),
-                readList(nbt, "BlockEntitySnapshots"),
-                nbt.contains("EnderChestInventory") ? nbt.getCompound("EnderChestInventory") : new NbtCompound());
+        return new CheckpointData(
+            pos, nbt.getFloat("Yaw"), nbt.getFloat("Pitch"),
+            nbt.getFloat("Health"), nbt.getInt("Hunger"), nbt.getFloat("Saturation"),
+            nbt.getInt("ExperienceLevel"), nbt.getFloat("ExperienceProgress"),
+            nbt.getInt("SculkWarningLevel"),
+            nbt.getInt("LoopNumber"), nbt.getLong("WorldTime"), dim, nbt.getLong("Timestamp"),
+            inv, readList(nbt, "StatusEffects"),
+            nbt.getBoolean("Raining"), nbt.getBoolean("Thundering"),
+            nbt.getInt("RainTime"), nbt.getInt("ThunderTime"), nbt.getInt("ClearWeatherTime"),
+            EntitySnapshot.readNbt(nbt),
+            readList(nbt, "BlockEntitySnapshots"),
+            nbt.contains("EnderChestInventory") ? nbt.getCompound("EnderChestInventory") : new NbtCompound()
+        );
     }
 }
