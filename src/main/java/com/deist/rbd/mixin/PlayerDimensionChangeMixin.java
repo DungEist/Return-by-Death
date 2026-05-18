@@ -23,7 +23,7 @@ public class PlayerDimensionChangeMixin {
         method = "moveToWorld",
         at = @At("TAIL")
     )
-    private void onMoveToWorld(ServerWorld destination, CallbackInfo ci) {
+    private void onMoveToWorld(ServerWorld destination, org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable<net.minecraft.entity.Entity> cir) {
         ServerPlayerEntity player = (ServerPlayerEntity)(Object) this;
         ServerWorld origin = player.getServerWorld();
 
