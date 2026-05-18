@@ -23,49 +23,63 @@ import java.util.List;
 import java.util.Map;
 
 public class CheckpointManager {
+
     private static CheckpointData currentCheckpoint = null;
+
+    // EndSnapshot: sống suốt vòng đời checkpoint, được share giữa các lần save()
+    // Không reset khi save() — chỉ commitExit() và có thể captureEntry/captureExit mới
+    private static EndSnapshot endSnapshot = new EndSnapshot();
+
+    // ── Public API ────────────────────────────────────────────────────────────
+
+    public static EndSnapshot getEndSnapshot() {
+        return endSnapshot;
+    }
 
     public static void save(ServerPlayerEntity player, ServerWorld world) {
         int loopNumber = currentCheckpoint != null ? currentCheckpoint.loopNumber : 0;
 
-        // ── Player inventory ───────────────────────────────────────────────
-        DefaultedList<ItemStack> inventoryCopy = DefaultedList.ofSize(player.getInventory().size(), ItemStack.EMPTY);
+        // Commit exit snapshot nếu có (player đã ra End và nay set CP mới)
+        endSnapshot.commitExit();
+
+        // Inventory
+        DefaultedList<ItemStack> inventoryCopy =
+                DefaultedList.ofSize(player.getInventory().size(), ItemStack.EMPTY);
         for (int i = 0; i < player.getInventory().size(); i++) {
             inventoryCopy.set(i, player.getInventory().getStack(i).copy());
         }
 
-        // ── Ender chest ────────────────────────────────────────────────────
+        // Ender chest
         NbtCompound enderChestNbt = new NbtCompound();
         enderChestNbt.put("Items", player.getEnderChestInventory().toNbtList());
 
-        // ── Weather ────────────────────────────────────────────────────────
+        // Weather
         ServerWorld overworld = world.getServer().getOverworld();
         ServerWorldProperties wProps = (ServerWorldProperties) overworld.getLevelProperties();
 
-        // ── Entity snapshot (loaded + unloaded chunks via disk) ───────────
-        // This replaces the old iterateEntities() + itemSnapshots approach.
-        // EntitySnapshot.capture() handles both loaded (memory) and unloaded (disk) chunks.
+        // Entity snapshot (Overworld + Nether, không có The End)
         EntitySnapshot entitySnapshot = EntitySnapshot.capture(world.getServer());
 
-        // ── Block entity snapshots (containers) ───────────────────────────
+        // Block entity snapshots (containers)
         List<NbtCompound> beSnapshots = new ArrayList<>();
         world.getServer().getWorlds().forEach(sw -> {
             try {
-                ChunkStorageAccessor accessor = (ChunkStorageAccessor) sw.getChunkManager().threadedAnvilChunkStorage;
+                ChunkStorageAccessor accessor =
+                        (ChunkStorageAccessor) sw.getChunkManager().threadedAnvilChunkStorage;
                 for (ChunkHolder holder : accessor.invokeEntryIterator()) {
                     net.minecraft.world.chunk.WorldChunk chunk = holder.getWorldChunk();
-                    if (chunk != null) {
-                        for (Map.Entry<BlockPos, BlockEntity> entry : chunk.getBlockEntities().entrySet()) {
-                            BlockEntity be = entry.getValue();
-                            if (be instanceof Inventory) {
-                                NbtCompound nbt = be.createNbt();
-                                nbt.putInt("RbdBeX", entry.getKey().getX());
-                                nbt.putInt("RbdBeY", entry.getKey().getY());
-                                nbt.putInt("RbdBeZ", entry.getKey().getZ());
-                                nbt.putString("RbdBeDim", sw.getRegistryKey().getValue().toString());
-                                beSnapshots.add(nbt);
-                            }
-                        }
+                    if (chunk == null) continue;
+                    for (Map.Entry<BlockPos, BlockEntity> entry :
+                            chunk.getBlockEntities().entrySet()) {
+                        BlockEntity be = entry.getValue();
+                        if (!(be instanceof Inventory)) continue;
+                        NbtCompound nbt = be.createNbt();
+                        nbt.putInt("RbdBeX", entry.getKey().getX());
+                        nbt.putInt("RbdBeY", entry.getKey().getY());
+                        nbt.putInt("RbdBeZ", entry.getKey().getZ());
+                        nbt.putString("RbdBeDim",
+                                sw.getRegistryKey().getValue().toString());
+                        beSnapshots.add(nbt);
                     }
                 }
             } catch (Exception e) {
@@ -73,27 +87,34 @@ public class CheckpointManager {
             }
         });
 
-        // ── Sculk ──────────────────────────────────────────────────────────
+        // Sculk
         int sculkLevel = player.getSculkShriekerWarningManager().isPresent()
-            ? player.getSculkShriekerWarningManager().get().getWarningLevel() : 0;
+                ? player.getSculkShriekerWarningManager().get().getWarningLevel() : 0;
 
         currentCheckpoint = new CheckpointData(
-            player.getBlockPos(), player.getYaw(), player.getPitch(),
-            player.getHealth(), player.getHungerManager().getFoodLevel(),
-            player.getHungerManager().getSaturationLevel(),
-            player.experienceLevel, player.experienceProgress, sculkLevel,
-            loopNumber,
-            world.getTimeOfDay(), world.getRegistryKey().getValue().toString(),
-            System.currentTimeMillis(), inventoryCopy, player.getStatusEffects(),
-            wProps.isRaining(), wProps.isThundering(),
-            wProps.getRainTime(), wProps.getThunderTime(), wProps.getClearWeatherTime(),
-            entitySnapshot, beSnapshots, enderChestNbt
+                player.getBlockPos(), player.getYaw(), player.getPitch(),
+                player.getHealth(),
+                player.getHungerManager().getFoodLevel(),
+                player.getHungerManager().getSaturationLevel(),
+                player.experienceLevel, player.experienceProgress, sculkLevel,
+                loopNumber,
+                world.getTimeOfDay(),
+                world.getRegistryKey().getValue().toString(),
+                System.currentTimeMillis(),
+                inventoryCopy,
+                player.getStatusEffects(),
+                wProps.isRaining(), wProps.isThundering(),
+                wProps.getRainTime(), wProps.getThunderTime(), wProps.getClearWeatherTime(),
+                entitySnapshot,
+                beSnapshots,
+                enderChestNbt,
+                endSnapshot          // pass current EndSnapshot state
         );
 
-        // ── Clear ALL dimension block logs ─────────────────────────────────
+        // Clear block delta logs
         world.getServer().getWorlds().forEach(sw -> RbdChangeLog.get(sw).clear());
 
-        // ── Persist to disk ────────────────────────────────────────────────
+        // Persist
         File dir = getSaveDirectory(world);
         if (!dir.exists()) dir.mkdirs();
         NbtCompound nbt = new NbtCompound();
@@ -110,8 +131,11 @@ public class CheckpointManager {
         File file = new File(getSaveDirectory(world), "checkpoint.nbt");
         if (!file.exists()) return null;
         try {
-            currentCheckpoint = CheckpointData.readNbt(
-                NbtIo.readCompressed(file.toPath(), NbtSizeTracker.ofUnlimitedBytes()));
+            NbtCompound nbt = NbtIo.readCompressed(
+                    file.toPath(), NbtSizeTracker.ofUnlimitedBytes());
+            currentCheckpoint = CheckpointData.readNbt(nbt);
+            // Restore EndSnapshot state từ disk
+            endSnapshot = currentCheckpoint.endSnapshot;
             return currentCheckpoint;
         } catch (IOException e) {
             e.printStackTrace();
@@ -121,6 +145,7 @@ public class CheckpointManager {
 
     public static void clear(ServerWorld world) {
         currentCheckpoint = null;
+        endSnapshot = new EndSnapshot();
         File f = new File(getSaveDirectory(world), "checkpoint.nbt");
         if (f.exists()) f.delete();
         world.getServer().getWorlds().forEach(sw -> RbdChangeLog.get(sw).clear());
@@ -131,6 +156,7 @@ public class CheckpointManager {
     }
 
     private static File getSaveDirectory(ServerWorld world) {
-        return new File(world.getServer().getSavePath(WorldSavePath.ROOT).toFile(), "rbd");
+        return new File(
+                world.getServer().getSavePath(WorldSavePath.ROOT).toFile(), "rbd");
     }
 }

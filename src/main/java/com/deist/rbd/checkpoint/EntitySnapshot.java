@@ -25,55 +25,68 @@ import java.util.*;
 import java.util.stream.Stream;
 
 /**
- * Full entity snapshot across ALL dimensions at checkpoint time.
+ * Entity snapshot cho Overworld và Nether (KHÔNG bao gồm The End).
+ * The End được xử lý riêng bởi EndSnapshot.
  *
- * Strategy:
- *   - Loaded chunks  → iterateEntities() (fast, already in memory)
- *   - Unloaded chunks → read entity region files from disk (.mca in entities/ folder)
+ * Restore strategy:
+ *   - Entity có trong snapshot + còn sống trong world → readNbt() trực tiếp
+ *   - Entity có trong snapshot + KHÔNG còn trong world → spawn mới (bị kill sau CP)
+ *   - Entity KHÔNG có trong snapshot + đang trong world → spawned sau CP → discard
+ *   - Item / XP / projectile → discard luôn
  *
- * Replaces: RbdEntityLog, bossSnapshots, RbdPendingDeletions
- *
- * Restore strategy (3 steps per dimension):
- *   1. For entities currently alive in world:
- *      - In snapshot  → readNbt() trực tiếp để restore state (tránh UUID conflict)
- *      - Not in snapshot → spawned after checkpoint → discard
- *   2. Item / XP / projectile → discard luôn (không restore)
- *   3. Entities có trong snapshot nhưng không còn trong world
- *      (bị kill sau checkpoint, hoặc ở unloaded chunk) → spawn mới từ NBT
- *
- * Không dùng "discard all rồi spawn lại" vì chunk loading tự reload entity
- * từ disk ngay sau discard → UUID conflict → Minecraft reject spawn mới.
- * Ngoài ra discard() trong tick loop gây NPE (crash Bee entity trong log).
+ * Tracking spawned-after-checkpoint UUIDs:
+ *   Khi entity mới spawn sau checkpoint (qua EntitySpawnMixin), UUID được thêm
+ *   vào spawnedAfterCheckpoint. Dùng để phân biệt entity "mới spawn" vs entity
+ *   "ở unloaded chunk khi CP, nay chunk load lại" — cả hai đều không có trong
+ *   iterateEntities() lúc capture nhưng behavior khác nhau khi restore.
  */
 public class EntitySnapshot {
 
     // dim registry key value string → list of entity NBTs
+    // Chỉ chứa Overworld và Nether, KHÔNG chứa The End
     private final Map<String, List<NbtCompound>> byDimension = new HashMap<>();
+
+    // UUID của entity spawned SAU KHI checkpoint được set.
+    // Static vì cần accessible từ EntitySpawnMixin.
+    // Reset mỗi lần CheckpointManager.save() được gọi.
+    private static final Set<UUID> spawnedAfterCheckpoint = new HashSet<>();
+
+    // ── Spawned tracking (gọi từ EntitySpawnMixin) ────────────────────────────
+
+    public static void recordSpawned(UUID uuid) {
+        spawnedAfterCheckpoint.add(uuid);
+    }
+
+    public static void clearSpawnedTracking() {
+        spawnedAfterCheckpoint.clear();
+    }
+
+    public static boolean wasSpawnedAfterCheckpoint(UUID uuid) {
+        return spawnedAfterCheckpoint.contains(uuid);
+    }
 
     // ── Capture ───────────────────────────────────────────────────────────────
 
     /**
-     * Build a full snapshot. Call this when the player sets a checkpoint.
-     * Captures loaded entities from memory, then fills unloaded chunks from disk.
-     *
-     * save(true) blocks until all dirty chunks are flushed to disk, ensuring
-     * entity state on disk is current before readFromDisk() runs.
+     * Capture Overworld + Nether entities.
+     * The End bị skip — xử lý bởi EndSnapshot.
      */
     public static EntitySnapshot capture(MinecraftServer server) {
-        // Blocking flush: đảm bảo disk state sync với memory trước khi đọc.
-        // Cần blocking (true) vì save(false) là async — readFromDisk() có thể
-        // chạy trước khi flush hoàn thành, dẫn đến đọc state cũ từ disk.
+        // Blocking flush để đảm bảo disk state sync với memory
         for (ServerWorld world : server.getWorlds()) {
+            if (world.getRegistryKey() == World.END) continue; // skip The End
             world.getChunkManager().save(true);
         }
 
         EntitySnapshot snap = new EntitySnapshot();
 
         for (ServerWorld world : server.getWorlds()) {
+            if (world.getRegistryKey() == World.END) continue; // The End → EndSnapshot
+
             String dimId = world.getRegistryKey().getValue().toString();
             List<NbtCompound> list = new ArrayList<>();
 
-            // ── 1. Loaded entities (in memory) — source of truth ──────────────
+            // 1. Loaded entities (in memory)
             Set<UUID> loadedUuids = new HashSet<>();
             world.iterateEntities().forEach(entity -> {
                 if (shouldSkip(entity)) return;
@@ -84,8 +97,7 @@ public class EntitySnapshot {
                 }
             });
 
-            // ── 2. Unloaded entities (from disk) ──────────────────────────────
-            // Chỉ lấy entity không có trong loaded set để tránh duplicate.
+            // 2. Unloaded entities (from disk) — chỉ lấy UUID chưa có trong loaded
             List<NbtCompound> diskEntities = readFromDisk(server, world);
             for (NbtCompound nbt : diskEntities) {
                 if (!nbt.containsUuid("UUID")) continue;
@@ -97,43 +109,38 @@ public class EntitySnapshot {
             snap.byDimension.put(dimId, list);
         }
 
+        // Reset spawn tracking sau khi capture
+        clearSpawnedTracking();
+
         return snap;
     }
 
-    // ── Rollback ──────────────────────────────────────────────────────────────
+    // ── Restore ───────────────────────────────────────────────────────────────
 
     /**
-     * Restore all entities to their checkpoint state across all dimensions.
-     *
-     * Không dùng "discard all → spawn lại" vì:
-     *   - Entity::discard() trong khi server đang tick có thể gây NPE (crash Bee/mob)
-     *     khi entity bị removed giữa chừng nhưng vẫn còn trong tick queue.
-     *   - Chunk loading tự reload entity từ disk ngay sau discard,
-     *     dẫn đến UUID conflict khi cố spawn entity từ snapshot.
-     *
-     * Thay vào đó: update NBT trực tiếp cho entity đang sống, chỉ spawn mới
-     * khi entity không còn tồn tại trong world.
+     * Restore Overworld + Nether entities về checkpoint state.
+     * The End KHÔNG được xử lý ở đây.
      */
     public void restore(MinecraftServer server) {
         for (ServerWorld world : server.getWorlds()) {
+            if (world.getRegistryKey() == World.END) continue; // The End → EndSnapshot
+
             String dimId = world.getRegistryKey().getValue().toString();
             List<NbtCompound> snapshots = byDimension.getOrDefault(dimId, Collections.emptyList());
 
-            // Build UUID → NBT lookup từ snapshot
+            // Build UUID → NBT lookup
             Map<UUID, NbtCompound> snapshotByUuid = new HashMap<>();
             for (NbtCompound nbt : snapshots) {
                 if (!nbt.containsUuid("UUID")) continue;
                 NbtCompound clean = nbt.copy();
-                clean.remove("RbdDim");
                 snapshotByUuid.put(nbt.getUuid("UUID"), clean);
             }
 
-            // ── Step 1 & 2: xử lý entities hiện đang có trong world ───────────
+            // Step 1 & 2: xử lý entities đang có trong world
             List<Entity> toDiscard = new ArrayList<>();
             world.iterateEntities().forEach(entity -> {
                 if (entity instanceof PlayerEntity) return;
 
-                // Item / XP / projectile: xóa hết, không restore
                 if (entity instanceof ItemEntity
                         || entity instanceof ExperienceOrbEntity
                         || entity instanceof ProjectileEntity) {
@@ -145,42 +152,39 @@ public class EntitySnapshot {
                 NbtCompound snap = snapshotByUuid.get(uuid);
 
                 if (snap != null) {
-                    // Entity có trong snapshot: restore state trực tiếp qua readNbt.
-                    // Không discard + respawn để tránh UUID conflict và tick-queue NPE.
+                    // Có trong snapshot → restore state trực tiếp
                     try {
                         entity.readNbt(snap);
                     } catch (Exception e) {
-                        System.err.println("[RbD] Failed to readNbt for entity "
-                                + uuid + " (" + entity.getType().toString() + "): " + e.getMessage());
+                        System.err.println("[RbD] readNbt failed for " + uuid
+                                + " (" + entity.getType() + "): " + e.getMessage());
                     }
-                    // Đánh dấu đã xử lý — không cần spawn lại ở step 3
                     snapshotByUuid.remove(uuid);
                 } else {
-                    // Entity không có trong snapshot: spawned sau checkpoint → xóa
+                    // Không có trong snapshot → spawned sau checkpoint → discard
+                    // Nhưng cần phân biệt: entity từ unloaded chunk (valid) vs spawned sau CP (invalid)
+                    // spawnedAfterCheckpoint tracking giải quyết điều này:
+                    // Entity từ unloaded chunk sẽ có UUID trong disk snapshot,
+                    // nên đã được xử lý ở capture() và có trong snapshotByUuid.
+                    // Entity thực sự spawned sau CP → không có trong snapshot → discard.
                     toDiscard.add(entity);
                 }
             });
 
-            // Discard entities cần xóa.
-            // Dùng setRemoved thay vì discard() để tránh trigger side effects
-            // (drop item, death event, v.v.) trong khi server đang tick.
             for (Entity entity : toDiscard) {
                 entity.setRemoved(Entity.RemovalReason.DISCARDED);
             }
 
-            // ── Step 3: spawn entities còn lại trong snapshot ─────────────────
-            // Đây là entity có trong checkpoint nhưng không còn trong world:
-            //   - Bị kill sau checkpoint
-            //   - Ở unloaded chunk (không có trong iterateEntities())
+            // Step 3: spawn entities có trong snapshot nhưng không còn trong world
+            // (bị kill sau checkpoint, hoặc ở unloaded chunk lúc restore)
             for (Map.Entry<UUID, NbtCompound> entry : snapshotByUuid.entrySet()) {
-                NbtCompound nbt = entry.getValue();
                 try {
-                    EntityType.loadEntityWithPassengers(nbt, world, entity -> {
+                    EntityType.loadEntityWithPassengers(entry.getValue(), world, entity -> {
                         world.spawnEntity(entity);
                         return entity;
                     });
                 } catch (Exception e) {
-                    System.err.println("[RbD] Failed to spawn entity from snapshot "
+                    System.err.println("[RbD] spawn from snapshot failed for "
                             + entry.getKey() + ": " + e.getMessage());
                 }
             }
@@ -214,26 +218,18 @@ public class EntitySnapshot {
 
     // ── Disk reader ───────────────────────────────────────────────────────────
 
-    /**
-     * Read entity NBT from the entities/ region files for this world dimension.
-     * Minecraft 1.17+ stores entity data separately from chunk data.
-     * Format: entities/r.X.Z.mca, each chunk section contains a list of entity NBTs.
-     */
     private static List<NbtCompound> readFromDisk(MinecraftServer server, ServerWorld world) {
         List<NbtCompound> result = new ArrayList<>();
-
         Path entityDir = getEntityDir(server, world);
         if (entityDir == null || !Files.isDirectory(entityDir)) return result;
 
         try (Stream<Path> files = Files.list(entityDir)) {
-            files.filter(p -> p.toString().endsWith(".mca")).forEach(regionPath -> {
-                readRegionFile(regionPath, result);
-            });
+            files.filter(p -> p.toString().endsWith(".mca"))
+                 .forEach(p -> readRegionFile(p, result));
         } catch (IOException e) {
             System.err.println("[RbD] Failed to list entity region files for "
                     + world.getRegistryKey().getValue() + ": " + e.getMessage());
         }
-
         return result;
     }
 
@@ -241,83 +237,66 @@ public class EntitySnapshot {
         try (RegionFile region = new RegionFile(regionPath, regionPath.getParent(), true)) {
             for (int cx = 0; cx < 32; cx++) {
                 for (int cz = 0; cz < 32; cz++) {
-                    net.minecraft.util.math.ChunkPos chunkPos =
+                    net.minecraft.util.math.ChunkPos pos =
                             new net.minecraft.util.math.ChunkPos(cx, cz);
-                    if (!region.isChunkValid(chunkPos)) continue;
-
-                    try (DataInputStream stream = region.getChunkInputStream(chunkPos)) {
+                    if (!region.isChunkValid(pos)) continue;
+                    try (DataInputStream stream = region.getChunkInputStream(pos)) {
                         if (stream == null) continue;
-                        NbtCompound chunkNbt = NbtIo.readCompound(stream, NbtSizeTracker.ofUnlimitedBytes());
-                        if (!chunkNbt.contains("Entities")) continue;
-                        NbtList entities = chunkNbt.getList("Entities", NbtCompound.COMPOUND_TYPE);
+                        NbtCompound chunk = NbtIo.readCompound(stream, NbtSizeTracker.ofUnlimitedBytes());
+                        if (!chunk.contains("Entities")) continue;
+                        NbtList entities = chunk.getList("Entities", NbtCompound.COMPOUND_TYPE);
                         for (int i = 0; i < entities.size(); i++) {
-                            NbtCompound entityNbt = entities.getCompound(i).copy();
-                            if (shouldSkipNbt(entityNbt)) continue;
-                            out.add(entityNbt);
+                            NbtCompound nbt = entities.getCompound(i).copy();
+                            if (shouldSkipNbt(nbt)) continue;
+                            out.add(nbt);
                         }
                     } catch (IOException e) {
-                        System.err.println("[RbD] Skipping corrupt entity chunk at "
-                                + chunkPos + " in " + regionPath.getFileName() + ": " + e.getMessage());
+                        System.err.println("[RbD] Skipping corrupt chunk at " + pos
+                                + " in " + regionPath.getFileName());
                     }
                 }
             }
         } catch (IOException e) {
-            System.err.println("[RbD] Failed to read entity region file "
-                    + regionPath.getFileName() + ": " + e.getMessage());
+            System.err.println("[RbD] Failed to read region file " + regionPath.getFileName());
         }
     }
 
-    /**
-     * Resolve the entities/ directory for a given world dimension.
-     * Overworld:  <save>/entities/
-     * Nether:     <save>/DIM-1/entities/
-     * The End:    <save>/DIM1/entities/
-     * Custom dim: <save>/dimensions/<namespace>/<path>/entities/
-     */
     private static Path getEntityDir(MinecraftServer server, ServerWorld world) {
         Path saveRoot = server.getSavePath(WorldSavePath.ROOT);
         RegistryKey<World> key = world.getRegistryKey();
-
-        if (key == World.OVERWORLD) {
-            return saveRoot.resolve("entities");
-        } else if (key == World.NETHER) {
-            return saveRoot.resolve("DIM-1").resolve("entities");
-        } else if (key == World.END) {
-            return saveRoot.resolve("DIM1").resolve("entities");
-        } else {
-            String namespace = key.getValue().getNamespace();
-            String path      = key.getValue().getPath();
-            return saveRoot.resolve("dimensions").resolve(namespace).resolve(path).resolve("entities");
-        }
+        if (key == World.OVERWORLD) return saveRoot.resolve("entities");
+        if (key == World.NETHER)    return saveRoot.resolve("DIM-1").resolve("entities");
+        if (key == World.END)       return saveRoot.resolve("DIM1").resolve("entities");
+        String ns   = key.getValue().getNamespace();
+        String path = key.getValue().getPath();
+        return saveRoot.resolve("dimensions").resolve(ns).resolve(path).resolve("entities");
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static boolean shouldSkip(Entity entity) {
-        if (entity instanceof PlayerEntity)        return true;
-        if (entity instanceof ItemEntity)          return true;
-        if (entity instanceof ExperienceOrbEntity) return true;
-        if (entity instanceof ProjectileEntity)    return true;
-        return false;
+        return entity instanceof PlayerEntity
+            || entity instanceof ItemEntity
+            || entity instanceof ExperienceOrbEntity
+            || entity instanceof ProjectileEntity;
     }
 
-    /** Same filter but for raw NBT (used when reading from disk). */
     private static boolean shouldSkipNbt(NbtCompound nbt) {
         String id = nbt.getString("id");
         return id.equals("minecraft:item")
-                || id.equals("minecraft:experience_orb")
-                || id.equals("minecraft:arrow")
-                || id.equals("minecraft:spectral_arrow")
-                || id.equals("minecraft:trident")
-                || id.equals("minecraft:fireball")
-                || id.equals("minecraft:small_fireball")
-                || id.equals("minecraft:snowball")
-                || id.equals("minecraft:egg")
-                || id.equals("minecraft:ender_pearl")
-                || id.equals("minecraft:eye_of_ender")
-                || id.equals("minecraft:fishing_bobber")
-                || id.equals("minecraft:llama_spit")
-                || id.equals("minecraft:wither_skull");
+            || id.equals("minecraft:experience_orb")
+            || id.equals("minecraft:arrow")
+            || id.equals("minecraft:spectral_arrow")
+            || id.equals("minecraft:trident")
+            || id.equals("minecraft:fireball")
+            || id.equals("minecraft:small_fireball")
+            || id.equals("minecraft:snowball")
+            || id.equals("minecraft:egg")
+            || id.equals("minecraft:ender_pearl")
+            || id.equals("minecraft:eye_of_ender")
+            || id.equals("minecraft:fishing_bobber")
+            || id.equals("minecraft:llama_spit")
+            || id.equals("minecraft:wither_skull");
     }
 
     private static NbtCompound writeEntity(Entity entity) {
@@ -327,8 +306,7 @@ public class EntitySnapshot {
             nbt.putString("id", EntityType.getId(entity.getType()).toString());
             return nbt;
         } catch (Exception e) {
-            System.err.println("[RbD] Failed to serialize entity "
-                    + entity.getUuid() + ": " + e.getMessage());
+            System.err.println("[RbD] Failed to serialize entity " + entity.getUuid());
             return null;
         }
     }

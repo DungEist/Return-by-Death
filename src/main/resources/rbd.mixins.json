@@ -14,7 +14,8 @@
     "RaidManagerAccessor",
     "EntityMixin",
     "PiglinGoldBypassMixin",
-    "RidingPreventMixin"
+    "RidingPreventMixin",
+    "PlayerDimensionChangeMixin"
   ],
   "client": [
     "client.ChatHudMixin"
