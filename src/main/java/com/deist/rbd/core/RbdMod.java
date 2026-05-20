@@ -126,6 +126,27 @@ public class RbdMod implements ModInitializer {
                 });
         });
 
+        // ENTITY_LOAD: dynamic capture of loaded pre-existing entities (to fix Bug 3)
+        net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents.ENTITY_LOAD.register((entity, world) -> {
+            if (!(world instanceof ServerWorld)) return;
+            if (world.getRegistryKey() == net.minecraft.world.World.END) return; // Skip The End (handled by EndSnapshot)
+
+            // Skip players, items, XP, projectiles (similar to EntitySnapshot.shouldSkip)
+            if (entity instanceof net.minecraft.entity.player.PlayerEntity) return;
+            if (entity instanceof net.minecraft.entity.ItemEntity
+                    || entity instanceof net.minecraft.entity.ExperienceOrbEntity
+                    || entity instanceof net.minecraft.entity.projectile.ProjectileEntity) return;
+
+            if (com.deist.rbd.core.RbdStateManager.isRollingBack()) return;
+
+            com.deist.rbd.checkpoint.EntitySnapshot snap = CheckpointManager.getCurrentEntitySnapshot();
+            if (snap != null && !snap.containsUuid(entity.getUuid())
+                    && !com.deist.rbd.checkpoint.EntitySnapshot.wasSpawnedAfterCheckpoint(entity.getUuid())) {
+                snap.addEntity(entity);
+                System.out.println("[RbD] Dynamically captured loaded pre-existing entity: " + entity.getType() + " (" + entity.getUuid() + ")");
+            }
+        });
+
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
             CheckpointManager.clearInMemory();
             synchronized (pendingTasks) { pendingTasks.clear(); }

@@ -36,6 +36,10 @@ public class CheckpointManager {
         return endSnapshot;
     }
 
+    public static EntitySnapshot getCurrentEntitySnapshot() {
+        return currentCheckpoint != null ? currentCheckpoint.entitySnapshot : null;
+    }
+
     public static void save(ServerPlayerEntity player, ServerWorld world) {
         int loopNumber = currentCheckpoint != null ? currentCheckpoint.loopNumber : 0;
 

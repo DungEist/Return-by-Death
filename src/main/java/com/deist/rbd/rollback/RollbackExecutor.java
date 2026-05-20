@@ -153,6 +153,18 @@ public class RollbackExecutor {
                 }
 
                 // ── 10. FINALIZE ──────────────────────────────────────────────
+                // Clear any Ender Dragon boss bars from player
+                world.getServer().getWorlds().forEach(sw -> {
+                    net.minecraft.entity.boss.dragon.EnderDragonFight fight = sw.getEnderDragonFight();
+                    if (fight != null) {
+                        try {
+                            ((com.deist.rbd.mixin.EnderDragonFightAccessor) fight).getBossBar().removePlayer(player);
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    }
+                });
+
                 cp.loopNumber++;
                 final ServerWorld ft = targetWorld;
                 CheckpointManager.save(player, ft);

@@ -34,9 +34,13 @@ public class PlayerDimensionChangeMixin {
         boolean goingToEnd   = destination.getRegistryKey() == World.END;
 
         if (goingToEnd && !endSnap.hasEntryBeenTaken()) {
-            // Lần đầu vào The End — chụp ngay trước khi player load vào
-            // Dùng destination world vì player chưa teleport xong
-            endSnap.captureEntry(player.getServer());
+            // Lần đầu vào The End — delay 60 ticks để chunks/entities load đầy đủ
+            net.minecraft.server.MinecraftServer server = player.getServer();
+            if (server != null) {
+                com.deist.rbd.core.RbdMod.scheduleTask(60, () -> {
+                    endSnap.captureEntry(server);
+                });
+            }
         }
 
         if (comingFromEnd && destination.getRegistryKey() != World.END) {

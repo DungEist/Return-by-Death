@@ -65,6 +65,26 @@ public class EntitySnapshot {
         return spawnedAfterCheckpoint.contains(uuid);
     }
 
+    public boolean containsUuid(UUID uuid) {
+        for (List<NbtCompound> list : byDimension.values()) {
+            for (NbtCompound nbt : list) {
+                if (nbt.containsUuid("UUID") && nbt.getUuid("UUID").equals(uuid)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    public void addEntity(Entity entity) {
+        String dimId = entity.getWorld().getRegistryKey().getValue().toString();
+        List<NbtCompound> list = byDimension.computeIfAbsent(dimId, k -> new ArrayList<>());
+        NbtCompound nbt = writeEntity(entity);
+        if (nbt != null) {
+            list.add(nbt);
+        }
+    }
+
     // ── Capture ───────────────────────────────────────────────────────────────
 
     /**

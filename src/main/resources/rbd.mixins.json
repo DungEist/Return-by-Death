@@ -15,7 +15,8 @@
     "EntityMixin",
     "PiglinGoldBypassMixin",
     "RidingPreventMixin",
-    "PlayerDimensionChangeMixin"
+    "PlayerDimensionChangeMixin",
+    "EnderDragonFightAccessor"
   ],
   "client": [
     "client.ChatHudMixin"
