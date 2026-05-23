@@ -63,6 +63,11 @@ public class EndSnapshot {
         if (entryTaken) return;
         entrySnapshot = captureEnd(server);
         entryTaken = true;
+        net.minecraft.server.world.ServerWorld endWorld = server.getWorld(net.minecraft.world.World.END);
+        if (endWorld != null) {
+            com.deist.rbd.log.RbdChangeLog.get(endWorld).clear();
+            System.out.println("[RbD] EndSnapshot: cleared End block change log");
+        }
         System.out.println("[RbD] EndSnapshot: captured entry snapshot");
     }
 
@@ -189,6 +194,15 @@ public class EndSnapshot {
                         .orElse(null);
 
                 if (data != null) {
+                    EnderDragonFight oldFight = endWorld.getEnderDragonFight();
+                    if (oldFight != null) {
+                        try {
+                            ((com.deist.rbd.mixin.EnderDragonFightAccessor) oldFight).getBossBar().clearPlayers();
+                            System.out.println("[RbD] EndSnapshot: cleared old DragonFight boss bar players");
+                        } catch (Exception e) {
+                            System.err.println("[RbD] EndSnapshot: failed to clear old boss bar: " + e.getMessage());
+                        }
+                    }
                     endWorld.setEnderDragonFight(new EnderDragonFight(endWorld, endWorld.getSeed(), data));
                     System.out.println("[RbD] EndSnapshot: DragonFight state restored");
                 }
