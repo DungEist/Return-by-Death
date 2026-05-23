@@ -89,10 +89,29 @@ public class MiasmaManager extends PersistentState {
 
         if (daysPassed >= RbdConfig.get().miasmaDecayDays) {
             int steps  = (int)(daysPassed / RbdConfig.get().miasmaDecayDays);
-            int newEff = Math.max(0, eff - steps);
-            effectiveDeaths.put(uuid, newEff);
-            int newLevel = Math.min(computeLevel(newEff), RbdConfig.get().maxMiasmaLevel);
             int oldLevel = miasmaLevels.getOrDefault(uuid, 0);
+            int newLevel = oldLevel;
+            int newEff = eff;
+            for (int i = 0; i < steps; i++) {
+                if (newLevel <= 0) {
+                    newEff = 0;
+                    newLevel = 0;
+                    break;
+                } else if (newLevel == 1) {
+                    newEff = 0;
+                    newLevel = 0;
+                } else if (newLevel == 2) {
+                    newEff = 3;
+                    newLevel = 1;
+                } else if (newLevel == 3) {
+                    newEff = 8;
+                    newLevel = 2;
+                } else {
+                    newLevel--;
+                    newEff = newLevel * 4;
+                }
+            }
+            effectiveDeaths.put(uuid, newEff);
             miasmaLevels.put(uuid, newLevel);
             lastGameDay.put(uuid, currentWorldDay - (daysPassed % RbdConfig.get().miasmaDecayDays));
             markDirty();

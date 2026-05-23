@@ -96,7 +96,7 @@ public class CheckpointManager {
                 ? player.getSculkShriekerWarningManager().get().getWarningLevel() : 0;
 
         currentCheckpoint = new CheckpointData(
-                player.getBlockPos(), player.getYaw(), player.getPitch(),
+                player.getX(), player.getY(), player.getZ(), player.getYaw(), player.getPitch(),
                 player.getHealth(),
                 player.getHungerManager().getFoodLevel(),
                 player.getHungerManager().getSaturationLevel(),

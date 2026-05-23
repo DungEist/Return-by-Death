@@ -2,9 +2,6 @@ package com.deist.rbd.mixin;
 
 import com.deist.rbd.checkpoint.CheckpointData;
 import com.deist.rbd.checkpoint.CheckpointManager;
-import com.deist.rbd.journal.DeathJournalItem;
-import com.deist.rbd.journal.JournalEntry;
-import com.deist.rbd.journal.JournalManager;
 import com.deist.rbd.miasma.MiasmaManager;
 import com.deist.rbd.rollback.RollbackExecutor;
 import net.minecraft.entity.damage.DamageSource;
@@ -29,21 +26,7 @@ public class PlayerDeathMixin {
         // ── 1. Increment miasma ────────────────────────────────────────────
         int newMiasmaLevel = MiasmaManager.get(player.server).onDeath(player.getUuid());
 
-        // ── 2. Record journal entry ────────────────────────────────────────
-        String cause = "";
-        try { cause = damageSource.getDeathMessage(player).getString(); } catch (Exception ignored) {}
-        long survived = world.getTime() - cp.timestamp;
-        JournalEntry entry = new JournalEntry(
-            cp.loopNumber,
-            System.currentTimeMillis(),
-            world.getTime(),
-            cause,
-            player.getX(), player.getY(), player.getZ(),
-            world.getRegistryKey().getValue().toString(),
-            survived,
-            newMiasmaLevel
-        );
-        JournalManager.addEntry(player, entry);
+
 
         // ── 3. Trigger rollback ────────────────────────────────────────────
         RollbackExecutor.execute(player, world, newMiasmaLevel);

@@ -30,6 +30,10 @@ public class RbdClientEntrypoint implements ClientModInitializer {
             client.execute(() -> MiasmaVisualHandler.setLevel(level, maxLevel));
         });
 
+        net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
+            client.execute(() -> MiasmaVisualHandler.setLevel(0, 4));
+        });
+
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             RbdClientEffects.tick();
             MiasmaVisualHandler.tick();

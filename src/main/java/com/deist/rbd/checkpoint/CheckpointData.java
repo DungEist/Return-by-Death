@@ -13,6 +13,7 @@ import java.util.Collection;
 import java.util.List;
 
 public class CheckpointData {
+    public final double x, y, z;
     public final BlockPos pos;
     public final float yaw, pitch;
     public final float health;
@@ -39,7 +40,7 @@ public class CheckpointData {
     public final EndSnapshot endSnapshot;
 
     public CheckpointData(
-            BlockPos pos, float yaw, float pitch,
+            double x, double y, double z, float yaw, float pitch,
             float health, int hunger, float saturation,
             int experienceLevel, float experienceProgress, int sculkWarningLevel,
             int loopNumber, long worldTime, String dimension, long timestamp,
@@ -52,7 +53,9 @@ public class CheckpointData {
             NbtCompound enderChestInventory,
             EndSnapshot endSnapshot) {
 
-        this.pos = pos; this.yaw = yaw; this.pitch = pitch;
+        this.x = x; this.y = y; this.z = z;
+        this.pos = new BlockPos((int)Math.floor(x), (int)Math.floor(y), (int)Math.floor(z));
+        this.yaw = yaw; this.pitch = pitch;
         this.health = health; this.hunger = hunger; this.saturation = saturation;
         this.experienceLevel = experienceLevel;
         this.experienceProgress = experienceProgress;
@@ -76,7 +79,7 @@ public class CheckpointData {
 
     // Private constructor for readNbt
     private CheckpointData(
-            BlockPos pos, float yaw, float pitch,
+            double x, double y, double z, BlockPos pos, float yaw, float pitch,
             float health, int hunger, float saturation,
             int experienceLevel, float experienceProgress, int sculkWarningLevel,
             int loopNumber, long worldTime, String dimension, long timestamp,
@@ -88,6 +91,7 @@ public class CheckpointData {
             NbtCompound enderChestInventory,
             EndSnapshot endSnapshot) {
 
+        this.x = x; this.y = y; this.z = z;
         this.pos = pos; this.yaw = yaw; this.pitch = pitch;
         this.health = health; this.hunger = hunger; this.saturation = saturation;
         this.experienceLevel = experienceLevel;
@@ -106,6 +110,9 @@ public class CheckpointData {
     }
 
     public void writeNbt(NbtCompound nbt) {
+        nbt.putDouble("PosXDouble", x);
+        nbt.putDouble("PosYDouble", y);
+        nbt.putDouble("PosZDouble", z);
         nbt.putInt("PosX", pos.getX());
         nbt.putInt("PosY", pos.getY());
         nbt.putInt("PosZ", pos.getZ());
@@ -160,6 +167,9 @@ public class CheckpointData {
     }
 
     public static CheckpointData readNbt(NbtCompound nbt) {
+        double x = nbt.contains("PosXDouble") ? nbt.getDouble("PosXDouble") : nbt.getInt("PosX") + 0.5;
+        double y = nbt.contains("PosYDouble") ? nbt.getDouble("PosYDouble") : nbt.getInt("PosY");
+        double z = nbt.contains("PosZDouble") ? nbt.getDouble("PosZDouble") : nbt.getInt("PosZ") + 0.5;
         BlockPos pos = new BlockPos(
                 nbt.getInt("PosX"), nbt.getInt("PosY"), nbt.getInt("PosZ"));
         DefaultedList<ItemStack> inv = DefaultedList.ofSize(41, ItemStack.EMPTY);
@@ -174,7 +184,7 @@ public class CheckpointData {
         if (dim.isEmpty()) dim = "minecraft:overworld";
 
         return new CheckpointData(
-                pos, nbt.getFloat("Yaw"), nbt.getFloat("Pitch"),
+                x, y, z, pos, nbt.getFloat("Yaw"), nbt.getFloat("Pitch"),
                 nbt.getFloat("Health"), nbt.getInt("Hunger"),
                 nbt.getFloat("Saturation"),
                 nbt.getInt("ExperienceLevel"), nbt.getFloat("ExperienceProgress"),

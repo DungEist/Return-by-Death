@@ -1,8 +1,6 @@
 package com.deist.rbd.core;
 
 import com.deist.rbd.checkpoint.CheckpointManager;
-import com.deist.rbd.journal.DeathJournalItem;
-import com.deist.rbd.journal.JournalManager;
 import com.deist.rbd.log.RbdChangeLog;
 import com.deist.rbd.miasma.MiasmaManager;
 import net.fabricmc.api.ModInitializer;
@@ -33,12 +31,6 @@ public class RbdMod implements ModInitializer {
         System.out.println("Initializing Return by Death Mod (Phase 3)");
         RbdConfig.load();
 
-        DeathJournalItem.INSTANCE = Registry.register(
-            Registries.ITEM,
-            new Identifier(MOD_ID, "death_journal"),
-            new DeathJournalItem(new Item.Settings().maxCount(1))
-        );
-
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             ServerPlayerEntity player = handler.player;
             if (CheckpointManager.load(player.getServerWorld()) == null) {
@@ -50,7 +42,6 @@ public class RbdMod implements ModInitializer {
                 });
             }
             scheduleTask(20, () -> {
-                DeathJournalItem.ensureJournal(player);
                 sendMiasmaSync(player, server);
             });
         });
@@ -73,11 +64,6 @@ public class RbdMod implements ModInitializer {
                     }
                     return 1;
                 }))
-                .then(literal("journal").then(literal("restore").executes(context -> {
-                    ServerPlayerEntity player = context.getSource().getPlayer();
-                    if (player != null) DeathJournalItem.ensureJournal(player);
-                    return 1;
-                })))
                 .then(literal("miasma").then(literal("level").executes(context -> {
                     ServerPlayerEntity player = context.getSource().getPlayer();
                     if (player != null) {

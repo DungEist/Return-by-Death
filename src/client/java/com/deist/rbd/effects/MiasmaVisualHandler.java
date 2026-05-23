@@ -2,14 +2,17 @@ package com.deist.rbd.effects;
 
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.util.Identifier;
 
 /**
  * Client-side persistent Miasma visual.
- * Shows a semi-transparent purple overlay when the player has Miasma level > 0.
+ * Shows a semi-transparent purple vignette when the player has Miasma level > 0.
  * Intensity scales with Miasma level (0 = none, maxLevel = max opacity).
  * Updated each time miasmaLevel is received from server.
  */
 public class MiasmaVisualHandler {
+
+    private static final Identifier VIGNETTE_TEXTURE = new Identifier("textures/misc/vignette.png");
 
     // Received from server via packet or command response
     private static int currentLevel = 0;
@@ -32,10 +35,31 @@ public class MiasmaVisualHandler {
 
     public static void tick() {
         if (burstTicks > 0) burstTicks--;
+
+        // Spawn witch particles around the player if they have Miasma
+        if (currentLevel > 0) {
+            MinecraftClient mc = MinecraftClient.getInstance();
+            if (mc.player != null && mc.world != null && !mc.isPaused()) {
+                int particleCount = currentLevel;
+                if (burstTicks > 0) {
+                    particleCount += 3;
+                }
+                for (int i = 0; i < particleCount; i++) {
+                    double px = mc.player.getX() + (mc.world.random.nextDouble() - 0.5) * 1.5;
+                    double py = mc.player.getY() + mc.world.random.nextDouble() * 2.0;
+                    double pz = mc.player.getZ() + (mc.world.random.nextDouble() - 0.5) * 1.5;
+                    mc.world.addParticle(
+                        net.minecraft.particle.ParticleTypes.WITCH,
+                        px, py, pz,
+                        0.0, 0.0, 0.0
+                    );
+                }
+            }
+        }
     }
 
     /**
-     * Render persistent purple overlay scaled by Miasma level.
+     * Render persistent purple vignette scaled by Miasma level.
      * Also adds a brief intensity burst right after respawn.
      */
     public static void renderVignette(DrawContext context) {
@@ -45,18 +69,36 @@ public class MiasmaVisualHandler {
         int w = mc.getWindow().getScaledWidth();
         int h = mc.getWindow().getScaledHeight();
 
-        // Base opacity: scales from 15 (Lv1) to 55 (maxLevel) out of 255
         float levelRatio = (float) currentLevel / maxLevel;
-        float baseAlpha = 15 + levelRatio * 40; // 15..55
+        float baseIntensity = 0.1f + levelRatio * 0.4f; // 0.1 .. 0.5
 
-        // Burst adds up to +80 alpha for 3s after respawn
-        float burstAlpha = burstTicks > 0
-            ? 80f * ((float) burstTicks / BURST_DURATION)
+        float burstIntensity = burstTicks > 0
+            ? 0.4f * ((float) burstTicks / BURST_DURATION)
             : 0f;
 
-        int alpha = (int) Math.min(baseAlpha + burstAlpha, 160);
-        int color = (alpha << 24) | 0x6A0DAD; // purple
-        context.fill(0, 0, w, h, color);
+        float intensity = Math.min(baseIntensity + burstIntensity, 0.9f);
+
+        // Inverse color tinting to render a purple vignette under multiply blend
+        float r = 1.0f - (0.8f * intensity);
+        float g = 1.0f - (0.1f * intensity);
+        float b = 1.0f - (0.8f * intensity);
+
+        com.mojang.blaze3d.systems.RenderSystem.disableDepthTest();
+        com.mojang.blaze3d.systems.RenderSystem.depthMask(false);
+        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
+        com.mojang.blaze3d.systems.RenderSystem.blendFuncSeparate(
+            com.mojang.blaze3d.platform.GlStateManager.SrcFactor.ZERO,
+            com.mojang.blaze3d.platform.GlStateManager.DstFactor.ONE_MINUS_SRC_COLOR,
+            com.mojang.blaze3d.platform.GlStateManager.SrcFactor.ONE,
+            com.mojang.blaze3d.platform.GlStateManager.DstFactor.ZERO
+        );
+        com.mojang.blaze3d.systems.RenderSystem.setShaderColor(r, g, b, 1.0f);
+        
+        context.drawTexture(VIGNETTE_TEXTURE, 0, 0, 0, 0, w, h, w, h);
+        
+        com.mojang.blaze3d.systems.RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
+        com.mojang.blaze3d.systems.RenderSystem.depthMask(true);
+        com.mojang.blaze3d.systems.RenderSystem.enableDepthTest();
     }
 
     public static boolean isActive() { return currentLevel > 0; }

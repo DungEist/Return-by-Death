@@ -130,9 +130,8 @@ public class RollbackExecutor {
                 );
 
                 // ── 9. PLAYER RESTORE ─────────────────────────────────────────
-                double safeY = findSafeY(targetWorld, cp.pos);
                 player.teleport(targetWorld,
-                        cp.pos.getX() + 0.5, safeY, cp.pos.getZ() + 0.5,
+                        cp.x, cp.y, cp.z,
                         cp.yaw, cp.pitch);
                 player.setHealth(cp.health);
                 player.getHungerManager().setFoodLevel(cp.hunger);
@@ -181,8 +180,6 @@ public class RollbackExecutor {
                 buf.writeInt(cp.loopNumber);
                 net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(player,
                         com.deist.rbd.effects.RbdNetworking.ROLLBACK_COMPLETE_ID, buf);
-
-                com.deist.rbd.journal.DeathJournalItem.ensureJournal(player);
             });
         });
     }
