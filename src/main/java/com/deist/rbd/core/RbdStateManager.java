@@ -11,6 +11,7 @@ public class RbdStateManager {
     private static final ThreadLocal<Boolean> rollingBack = ThreadLocal.withInitial(() -> false);
     private static final Set<UUID> waitingForRollback = Collections.synchronizedSet(new HashSet<>());
     private static final ThreadLocal<ChangeType> currentCause = ThreadLocal.withInitial(() -> ChangeType.UNKNOWN);
+    private static final ThreadLocal<Boolean> codeGenerating = ThreadLocal.withInitial(() -> false);
 
     public static boolean isRollingBack() {
         return rollingBack.get();
@@ -18,6 +19,14 @@ public class RbdStateManager {
 
     public static void setRollingBack(boolean value) {
         rollingBack.set(value);
+    }
+
+    public static boolean isCodeGenerating() {
+        return codeGenerating.get();
+    }
+
+    public static void setCodeGenerating(boolean value) {
+        codeGenerating.set(value);
     }
 
     public static boolean isWaitingForRollback(UUID uuid) {

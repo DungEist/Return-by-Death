@@ -19,7 +19,7 @@ public class WorldMixin {
 
     @Inject(method = "setBlockState(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/BlockState;II)Z", at = @At("HEAD"))
     private void onSetBlock(BlockPos pos, BlockState newState, int flags, int maxUpdateDepth, CallbackInfoReturnable<Boolean> cir) {
-        if (RbdStateManager.isRollingBack()) return;
+        if (RbdStateManager.isRollingBack() || RbdStateManager.isCodeGenerating()) return;
 
         World world = (World) (Object) this;
         if (world.isClient()) return; // Chỉ log trên server
