@@ -159,6 +159,16 @@ public class EndSnapshot {
             if (snap != null) {
                 try {
                     entity.readNbt(snap);
+                    net.minecraft.nbt.NbtList posList = snap.getList("Pos", net.minecraft.nbt.NbtElement.DOUBLE_TYPE);
+                    net.minecraft.nbt.NbtList rotList = snap.getList("Rotation", net.minecraft.nbt.NbtElement.FLOAT_TYPE);
+                    if (posList.size() == 3) {
+                        double x = posList.getDouble(0);
+                        double y = posList.getDouble(1);
+                        double z = posList.getDouble(2);
+                        float yaw = rotList.size() >= 2 ? rotList.getFloat(0) : entity.getYaw();
+                        float pitch = rotList.size() >= 2 ? rotList.getFloat(1) : entity.getPitch();
+                        entity.refreshPositionAndAngles(x, y, z, yaw, pitch);
+                    }
                 } catch (Exception e) {
                     System.err.println("[RbD] EndSnapshot: readNbt failed for " + uuid + ": " + e.getMessage());
                 }
