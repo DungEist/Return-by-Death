@@ -21,6 +21,9 @@ public class RidingPreventMixin {
         if (!(self instanceof ServerPlayerEntity player)) return;
         if (player.server == null) return;
 
+        // Miasma only prevents riding intelligent/living mobs (LivingEntity), not vehicles like boats or minecarts
+        if (!(vehicle instanceof net.minecraft.entity.LivingEntity)) return;
+
         int level = MiasmaManager.get(player.server).getMiasmaLevel(player.getUuid());
         if (level >= 1) {
             cir.setReturnValue(false); // reject mount attempt
